@@ -1,0 +1,155 @@
+### cae-np-alln-cxdetesting-dev.yaml is of the format cae-np-<location>-<namespace>-<prod/stage/dev>.yaml
+
+###Contents:
+#Replace anuam-fastapi-mongo with the app name, preferably in the format cecid-appname.
+#Replace ba46b7739471f55b0df5e1befb3e6ab04165e5da with the software ID from CoDE. It is just used for labels afaik, so if not feasible, can be skipped.
+
+---
+# App deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: anuam-fastapi-mongo
+  namespace: 'cxdetesting'
+  labels:
+    softwareId: 9d186745729db5d0933ef2d5f5c6cea7f11b822d
+    softwareName: anuam-fastapi-mongo
+spec:
+  selector:
+    matchLabels:
+      app: anuam-fastapi-mongo
+  replicas: 1
+  template:
+    metadata:
+      namespace: 'cxdetesting'
+      labels:
+        app: anuam-fastapi-mongo
+        environment: 'stage'
+        softwareId: 9d186745729db5d0933ef2d5f5c6cea7f11b822d
+        softwareName: anuam-fastapi-mongo
+    spec:
+      containers:
+      - image: "containers.cisco.com/proseide/anuam-fastapi-mongo"
+        imagePullPolicy: Always
+        name: anuam-fastapi-mongo
+        ports:
+        - containerPort: 5000
+        env:
+        - name: MONGO_URI
+          value: 'mongodb://anuam-fastapi-mongo-mongo-service:27017/anuam-fastapi-mongo'
+        resources:
+          limits:
+            cpu: 125m
+            memory: 256Mi
+          requests:
+            cpu: 125m
+            memory: 128Mi
+      imagePullSecrets:
+      - name: proseide-cdconsole-bot-pull-secret
+
+---
+# App service exposing port 5000
+apiVersion: v1
+kind: Service
+metadata:
+  name: anuam-fastapi-mongo-service
+  namespace: 'cxdetesting'
+  labels:
+    softwareId: 9d186745729db5d0933ef2d5f5c6cea7f11b822d
+    softwareName: anuam-fastapi-mongo
+spec:
+  ports:
+    - name: "web"
+      protocol: "TCP"
+      port: 5000
+  selector:
+      app: anuam-fastapi-mongo
+  type: ClusterIP
+
+---
+# Ingress pointing to app port 5000
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: anuam-fastapi-mongo-deployment
+  namespace: cxdetesting
+spec:
+  host: anuam-fastapi-mongo.cisco.com
+  to:
+    kind: Service
+    name: anuam-fastapi-mongo-service
+  tls:
+    termination: edge
+  port:
+    targetPort: web
+
+---
+# Mongo deployment, does not persist data on container recreates for now.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: anuam-fastapi-mongo-mongo-deployment
+  namespace: cxdetesting
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: anuam-fastapi-mongo-mongo
+  template:
+    metadata:
+      labels:
+        app: anuam-fastapi-mongo-mongo
+    spec:
+      containers:
+        - image: containers.cisco.com/proseide/mongo
+          imagePullPolicy: Always
+          name: mongo
+          ports:
+            - containerPort: 27017
+          volumeMounts:
+            - name: mongodata
+              mountPath: /data/db
+              subPath: db
+            - name: mongodata
+              mountPath: /data/configdb
+              subPath: configdb
+          resources:
+            limits:
+              cpu: 125m
+              memory: 256Mi
+            requests:
+              cpu: 125m
+              memory: 128Mi
+      volumes:
+        - name: mongodata
+          persistentVolumeClaim: 
+            claimName: anuam-fastapi-mongo-pvc
+
+---
+# Mongo service on port 27017
+apiVersion: v1
+kind: Service
+metadata:
+  name: anuam-fastapi-mongo-mongo-service
+  namespace: 'cxdetesting'
+spec:
+  ports:
+    - protocol: "TCP"
+      port: 27017
+  selector:
+      app: anuam-fastapi-mongo-mongo
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: anuam-fastapi-mongo-pvc
+  namespace: cxdetesting
+spec:
+  accessModes:
+    - ReadWriteOnce
+  volumeMode: Filesystem
+  resources:
+    requests:
+      storage: 1Gi

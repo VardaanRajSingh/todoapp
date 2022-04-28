@@ -1,0 +1,155 @@
+### cae-np-alln-cxdetesting-dev.yaml is of the format cae-np-<location>-<namespace>-<prod/stage/dev>.yaml
+
+###Contents:
+#Replace todoapp with the app name, preferably in the format cecid-appname.
+#Replace ba46b7739471f55b0df5e1befb3e6ab04165e5da with the software ID from CoDE. It is just used for labels afaik, so if not feasible, can be skipped.
+
+---
+# App deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: 'todoapp'
+  namespace: 'cxdetesting'
+  labels:
+    softwareId: 'ba46b7739471f55b0df5e1befb3e6ab04165e5da'
+    softwareName: 'todoapp'
+spec:
+  selector:
+    matchLabels:
+      app: 'todoapp'
+  replicas: 1
+  template:
+    metadata:
+      namespace: 'cxdetesting'
+      labels:
+        app: 'todoapp'
+        environment: 'stage'
+        softwareId: 'ba46b7739471f55b0df5e1befb3e6ab04165e5da'
+        softwareName: 'todoapp'
+    spec:
+      containers:
+      - image: "containers.cisco.com/proseide/todoapp"
+        imagePullPolicy: Always
+        name: 'todoapp'
+        ports:
+        - containerPort: 5000
+        env:
+        - name: MONGO_URI
+          value: 'mongodb://todoapp-mongo-service:27017/todoapp'
+        resources:
+          limits:
+            cpu: 125m
+            memory: 256Mi
+          requests:
+            cpu: 125m
+            memory: 128Mi
+      imagePullSecrets:
+      - name: proseide-cdconsole-bot-pull-secret
+
+---
+# App service exposing port 5000
+apiVersion: v1
+kind: Service
+metadata:
+  name: 'todoapp-service'
+  namespace: 'cxdetesting'
+  labels:
+    softwareId: 'ba46b7739471f55b0df5e1befb3e6ab04165e5da'
+    softwareName: 'todoapp'
+spec:
+  ports:
+    - name: "web"
+      protocol: "TCP"
+      port: 5000
+  selector:
+      app: 'todoapp'
+  type: ClusterIP
+
+---
+# Ingress pointing to app port 5000
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: todoapp-deployment
+  namespace: cxdetesting
+spec:
+  host: todoapp.cisco.com
+  to:
+    kind: Service
+    name: todoapp-service
+  tls:
+    termination: edge
+  port:
+    targetPort: web
+
+---
+# Mongo deployment, does not persist data on container recreates for now.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: todoapp-mongo-deployment
+  namespace: cxdetesting
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: todoapp-mongo
+  template:
+    metadata:
+      labels:
+        app: todoapp-mongo
+    spec:
+      containers:
+        - image: containers.cisco.com/proseide/mongo
+          imagePullPolicy: Always
+          name: mongo
+          ports:
+            - containerPort: 27017
+          volumeMounts:
+            - name: mongodata
+              mountPath: /data/db
+              subPath: db
+            - name: mongodata
+              mountPath: /data/configdb
+              subPath: configdb
+          resources:
+            limits:
+              cpu: 125m
+              memory: 256Mi
+            requests:
+              cpu: 125m
+              memory: 128Mi
+      volumes:
+        - name: mongodata
+          persistentVolumeClaim: 
+            claimName: todoapp-pvc
+
+---
+# Mongo service on port 27017
+apiVersion: v1
+kind: Service
+metadata:
+  name: 'todoapp-mongo-service'
+  namespace: 'cxdetesting'
+spec:
+  ports:
+    - protocol: "TCP"
+      port: 27017
+  selector:
+      app: 'todoapp-mongo'
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: todoapp-pvc
+  namespace: cxdetesting
+spec:
+  accessModes:
+    - ReadWriteOnce
+  volumeMode: Filesystem
+  resources:
+    requests:
+      storage: 1Gi
